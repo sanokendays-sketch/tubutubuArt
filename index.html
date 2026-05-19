@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>写真つぶつぶアートくん</title>
+    <meta
+      name="description"
+      content="ブラウザ内だけで写真モザイク画像を作れる小さなWebアプリです。"
+    >
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="series-name">カメおやじAI工房 小さな道具シリーズ</p>
+          <h1>写真つぶつぶアートくん</h1>
+          <p class="lead">
+            遠くから見ると1枚の絵、近くで見ると小さな写真。元画像と素材写真を選ぶだけで、
+            フォトモザイク画像をブラウザ内で作れます。
+          </p>
+        </div>
+      </header>
+
+      <section class="notice" aria-label="プライバシーについて">
+        画像はブラウザ内だけで処理され、外部には送信されません。
+      </section>
+
+      <section class="workspace">
+        <div class="control-panel">
+          <section class="panel-section">
+            <h2>1. 写真を選ぶ</h2>
+
+            <label class="file-box" for="sourceImage">
+              <span class="file-title">元画像</span>
+              <span class="file-note">大きな絵として見せたい写真を1枚選びます</span>
+              <input id="sourceImage" type="file" accept="image/*">
+            </label>
+            <p id="sourceStatus" class="status-text">元画像：未選択</p>
+
+            <label class="file-box" for="tileImages">
+              <span class="file-title">素材写真</span>
+              <span class="file-note">小さなタイルとして使う写真を複数選びます</span>
+              <input id="tileImages" type="file" accept="image/*" multiple>
+            </label>
+            <p id="tileStatus" class="status-text">素材写真：0枚</p>
+            <p id="tileGuidance" class="guidance-text">100枚以下：快適に処理できます</p>
+          </section>
+
+          <section class="panel-section">
+            <h2>2. 仕上がりを調整</h2>
+
+            <fieldset class="setting-group">
+              <legend>タイルサイズ</legend>
+              <label>
+                <input type="radio" name="tileSize" value="12">
+                小：12px
+              </label>
+              <label>
+                <input type="radio" name="tileSize" value="20" checked>
+                中：20px
+              </label>
+              <label>
+                <input type="radio" name="tileSize" value="32">
+                大：32px
+              </label>
+            </fieldset>
+
+            <div class="setting-group">
+              <label class="range-label" for="overlayStrength">
+                <span>元画像の重ね具合</span>
+                <strong><span id="overlayValue">20</span>%</strong>
+              </label>
+              <input id="overlayStrength" type="range" min="0" max="50" value="20">
+            </div>
+
+            <fieldset class="setting-group">
+              <legend>出力サイズ</legend>
+              <label>
+                <input type="radio" name="outputWidth" value="1000" checked>
+                標準：1000px幅
+              </label>
+              <label>
+                <input type="radio" name="outputWidth" value="1600">
+                高画質：1600px幅
+              </label>
+            </fieldset>
+
+            <fieldset class="setting-group">
+              <legend>素材の使い方</legend>
+              <label>
+                <input type="radio" name="selectionMode" value="balanced" checked>
+                バランス優先
+              </label>
+              <label>
+                <input type="radio" name="selectionMode" value="color">
+                色を優先
+              </label>
+            </fieldset>
+          </section>
+
+          <section class="panel-section actions-section">
+            <button id="generateButton" class="primary-button" type="button">
+              フォトモザイクを生成
+            </button>
+            <button id="resetButton" class="secondary-button" type="button">
+              リセット
+            </button>
+            <button id="downloadButton" class="secondary-button" type="button" disabled>
+              PNGで保存
+            </button>
+            <button id="downloadHtmlButton" class="secondary-button" type="button" disabled>
+              HTMLで保存
+            </button>
+          </section>
+
+          <div id="messageArea" class="message-area" role="status" aria-live="polite"></div>
+          <div id="usageStats" class="usage-stats" aria-live="polite"></div>
+        </div>
+
+        <section class="preview-panel" aria-label="プレビュー">
+          <div class="preview-head">
+            <h2>プレビュー</h2>
+            <p id="previewSize">まだ生成されていません</p>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="previewCanvas"></canvas>
+            <p id="emptyPreview" class="empty-preview">
+              ここにフォトモザイク画像が表示されます
+            </p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
