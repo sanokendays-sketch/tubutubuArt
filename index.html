@@ -65,6 +65,10 @@
                 <input type="radio" name="tileSize" value="32">
                 大：32px
               </label>
+              <label>
+                <input type="radio" name="tileSize" value="48">
+                特大：48px
+              </label>
             </fieldset>
 
             <div class="setting-group">
@@ -98,6 +102,34 @@
                 色を優先
               </label>
             </fieldset>
+
+            <fieldset class="setting-group">
+              <legend>保存品質</legend>
+              <label>
+                <input type="radio" name="saveQuality" value="light">
+                軽量
+              </label>
+              <label>
+                <input type="radio" name="saveQuality" value="standard" checked>
+                標準
+              </label>
+              <label>
+                <input type="radio" name="saveQuality" value="high">
+                品質優先
+              </label>
+            </fieldset>
+
+            <fieldset class="setting-group">
+              <legend>用途</legend>
+              <label>
+                <input type="radio" name="usagePreset" value="print" checked>
+                印刷用
+              </label>
+              <label>
+                <input type="radio" name="usagePreset" value="screen">
+                画面で拡大して見る用
+              </label>
+            </fieldset>
           </section>
 
           <section class="panel-section actions-section">
@@ -111,7 +143,7 @@
               PNGで保存
             </button>
             <button id="downloadHtmlButton" class="secondary-button" type="button" disabled>
-              HTMLで保存
+              作品ページとして保存（HTML）
             </button>
           </section>
 

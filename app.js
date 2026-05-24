@@ -1,9 +1,14 @@
 (function () {
   "use strict";
 
-  const THUMBNAIL_SIZE = 80;
+  const COLOR_THUMBNAIL_SIZE = 24;
   const MAX_TILE_IMAGES = 1000;
   const YIELD_EVERY_TILES = 180;
+  const SAVE_QUALITY_SETTINGS = {
+    light: { label: "軽量", size: 256 },
+    standard: { label: "標準", size: 320 },
+    high: { label: "品質優先", size: 512 }
+  };
 
   const sourceInput = document.getElementById("sourceImage");
   const tileInput = document.getElementById("tileImages");
@@ -22,6 +27,8 @@
   const emptyPreview = document.getElementById("emptyPreview");
   const previewSize = document.getElementById("previewSize");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const saveQualityInputs = document.querySelectorAll('input[name="saveQuality"]');
+  const usagePresetInputs = document.querySelectorAll('input[name="usagePreset"]');
 
   let sourceImage = null;
   let sourceFileName = "";
@@ -36,6 +43,12 @@
   resetButton.addEventListener("click", resetApp);
   downloadButton.addEventListener("click", downloadMosaic);
   downloadHtmlButton.addEventListener("click", downloadMosaicHtml);
+  for (const input of saveQualityInputs) {
+    input.addEventListener("change", handleSaveQualityChange);
+  }
+  for (const input of usagePresetInputs) {
+    input.addEventListener("change", handleUsagePresetChange);
+  }
 
   updateOverlayLabel();
 
@@ -96,7 +109,7 @@
       setWorking(true, `素材写真を読み込み中 0 / ${files.length}`);
 
       for (let index = 0; index < files.length; index += 1) {
-        const tile = await createTileThumbnail(files[index], index);
+        const tile = await createTileData(files[index], index, getSaveQualitySetting());
         tileLibrary.push(tile);
 
         if ((index + 1) % 10 === 0 || index + 1 === files.length) {
@@ -143,6 +156,7 @@
       const outputWidth = getSelectedNumber("outputWidth");
       const tileSize = getSelectedNumber("tileSize");
       const selectionMode = getSelectedValue("selectionMode");
+      const saveQuality = getActualSaveQualitySetting();
       const overlayAlpha = Number(overlayInput.value) / 100;
       const outputHeight = Math.max(1, Math.round(outputWidth * sourceImage.height / sourceImage.width));
 
@@ -161,6 +175,7 @@
       const totalRows = Math.ceil(outputHeight / tileSize);
       const totalTiles = totalColumns * totalRows;
       const selectedTileGrid = Array.from({ length: totalRows }, () => Array(totalColumns).fill(null));
+      const tileLayout = [];
       let completedTiles = 0;
 
       resetTileUsage();
@@ -178,7 +193,8 @@
           const bestTile = findBestTile(averageColor, selectionMode, leftTileId, topTileId);
           selectedTileGrid[row][column] = bestTile.id;
           bestTile.usedCount += 1;
-          ctx.drawImage(bestTile.image, x, y, width, height);
+          tileLayout.push({ id: bestTile.id, x, y, width, height });
+          ctx.drawImage(bestTile.renderThumb, x, y, width, height);
 
           completedTiles += 1;
           if (completedTiles % YIELD_EVERY_TILES === 0) {
@@ -203,7 +219,11 @@
         outputHeight,
         tileSize,
         overlayPercent: Number(overlayInput.value),
-        selectionMode
+        selectionMode,
+        saveQualityKey: saveQuality.key,
+        saveQualityLabel: saveQuality.label,
+        renderThumbSize: saveQuality.size,
+        tileLayout
       });
       downloadButton.disabled = false;
       downloadHtmlButton.disabled = false;
@@ -222,18 +242,29 @@
     }
   }
 
-  function createTileThumbnail(file, id) {
+  function createTileData(file, id, saveQuality) {
     return loadImageFromFile(file).then((image) => {
-      const tileCanvas = document.createElement("canvas");
-      tileCanvas.width = THUMBNAIL_SIZE;
-      tileCanvas.height = THUMBNAIL_SIZE;
-      const tileCtx = tileCanvas.getContext("2d", { willReadFrequently: true });
-      drawCroppedImage(tileCtx, image, 0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-      const averageColor = getAverageColor(tileCtx, 0, 0, THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+      const colorThumb = document.createElement("canvas");
+      colorThumb.width = COLOR_THUMBNAIL_SIZE;
+      colorThumb.height = COLOR_THUMBNAIL_SIZE;
+      const colorCtx = colorThumb.getContext("2d", { willReadFrequently: true });
+      drawCroppedImage(colorCtx, image, 0, 0, COLOR_THUMBNAIL_SIZE, COLOR_THUMBNAIL_SIZE);
+      const averageColor = getAverageColor(colorCtx, 0, 0, COLOR_THUMBNAIL_SIZE, COLOR_THUMBNAIL_SIZE);
+
+      const renderThumb = document.createElement("canvas");
+      renderThumb.width = saveQuality.size;
+      renderThumb.height = saveQuality.size;
+      const renderCtx = renderThumb.getContext("2d");
+      drawCroppedImage(renderCtx, image, 0, 0, saveQuality.size, saveQuality.size);
 
       return {
         id,
-        image: tileCanvas,
+        fileName: file.name,
+        colorThumb,
+        renderThumb,
+        saveQualityKey: saveQuality.key,
+        saveQualityLabel: saveQuality.label,
+        renderThumbSize: saveQuality.size,
         averageColor,
         usedCount: 0
       };
@@ -387,6 +418,8 @@
     document.querySelector('input[name="tileSize"][value="20"]').checked = true;
     document.querySelector('input[name="outputWidth"][value="1000"]').checked = true;
     document.querySelector('input[name="selectionMode"][value="balanced"]').checked = true;
+    document.querySelector('input[name="saveQuality"][value="standard"]').checked = true;
+    document.querySelector('input[name="usagePreset"][value="print"]').checked = true;
     lastMosaicInfo = null;
     updateOverlayLabel();
     updateTileStatus();
@@ -402,33 +435,85 @@
     clearUsageStats();
   }
 
-  function downloadMosaic() {
+  async function downloadMosaic() {
     if (!canvas.width || !canvas.height) {
+      return;
+    }
+
+    const blob = await canvasToBlob(canvas);
+    if (!blob) {
+      showMessage("PNG保存用の画像を作れませんでした。", "error");
       return;
     }
 
     const link = document.createElement("a");
     link.download = "photo-mosaic.png";
-    link.href = canvas.toDataURL("image/png");
+    link.href = URL.createObjectURL(blob);
     link.click();
+
+    window.setTimeout(() => {
+      URL.revokeObjectURL(link.href);
+    }, 1000);
   }
 
-  function downloadMosaicHtml() {
+  async function downloadMosaicHtml() {
     if (!canvas.width || !canvas.height || !lastMosaicInfo) {
       return;
     }
 
-    const html = createMosaicHtml(canvas.toDataURL("image/png"), lastMosaicInfo);
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.download = "photo-mosaic.html";
-    link.href = url;
-    link.click();
+    try {
+      setWorking(true, "HTML作品ページを準備中...");
+      const html = await createMosaicHtml(lastMosaicInfo);
+      const htmlBlob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(htmlBlob);
+      const link = document.createElement("a");
+      link.download = `photo-mosaic-view-${formatFileDate(new Date())}.html`;
+      link.href = url;
+      link.click();
 
-    window.setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 1000);
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1000);
+      showMessage("HTML作品ページを保存しました。", "success");
+    } catch (error) {
+      showMessage("HTML保存用のファイルを作れませんでした。素材写真の枚数や保存品質を調整してください。", "error");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function canvasToBlob(targetCanvas) {
+    return new Promise((resolve) => {
+      if (targetCanvas.toBlob) {
+        targetCanvas.toBlob((blob) => resolve(blob), "image/png");
+        return;
+      }
+
+      const dataUrl = targetCanvas.toDataURL("image/png");
+      const byteString = window.atob(dataUrl.split(",")[1]);
+      const mimeString = dataUrl.split(",")[0].split(":")[1].split(";")[0];
+      const bytes = new Uint8Array(byteString.length);
+
+      for (let index = 0; index < byteString.length; index += 1) {
+        bytes[index] = byteString.charCodeAt(index);
+      }
+
+      resolve(new Blob([bytes], { type: mimeString }));
+    });
+  }
+
+  async function canvasToDataUrl(targetCanvas) {
+    const blob = await canvasToBlob(targetCanvas);
+    return readBlobAsDataUrl(blob);
+  }
+
+  function readBlobAsDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Blob read failed"));
+      reader.readAsDataURL(blob);
+    });
   }
 
   function getSelectedNumber(name) {
@@ -439,6 +524,60 @@
   function getSelectedValue(name) {
     const selected = document.querySelector(`input[name="${name}"]:checked`);
     return selected.value;
+  }
+
+  function getSaveQualitySetting() {
+    const key = getSelectedValue("saveQuality");
+    return {
+      key,
+      ...SAVE_QUALITY_SETTINGS[key]
+    };
+  }
+
+  function getActualSaveQualitySetting() {
+    if (tileLibrary.length > 0) {
+      return {
+        key: tileLibrary[0].saveQualityKey,
+        label: tileLibrary[0].saveQualityLabel,
+        size: tileLibrary[0].renderThumbSize
+      };
+    }
+
+    return getSaveQualitySetting();
+  }
+
+  function handleSaveQualityChange() {
+    lastMosaicInfo = null;
+    downloadHtmlButton.disabled = true;
+
+    if (tileLibrary.length > 0) {
+      showMessage("保存品質を変えました。新しい品質で保存するには、素材写真を選び直してください。");
+    }
+  }
+
+  function handleUsagePresetChange() {
+    const preset = getSelectedValue("usagePreset");
+
+    if (preset === "screen") {
+      document.querySelector('input[name="tileSize"][value="48"]').checked = true;
+      document.querySelector('input[name="saveQuality"][value="standard"]').checked = true;
+      overlayInput.value = "10";
+    } else {
+      document.querySelector('input[name="tileSize"][value="20"]').checked = true;
+      document.querySelector('input[name="saveQuality"][value="standard"]').checked = true;
+      overlayInput.value = "20";
+    }
+
+    updateOverlayLabel();
+    lastMosaicInfo = null;
+    downloadButton.disabled = true;
+    downloadHtmlButton.disabled = true;
+    clearUsageStats();
+    if (tileLibrary.length > 0) {
+      showMessage("用途に合わせて設定を切り替えました。保存品質も反映するには素材写真を選び直してください。");
+    } else {
+      showMessage("用途に合わせて設定を切り替えました。");
+    }
   }
 
   function resetTileUsage() {
@@ -478,7 +617,12 @@
       overlayPercent: details && typeof details.overlayPercent === "number"
         ? details.overlayPercent
         : Number(overlayInput.value),
-      selectionMode: details && details.selectionMode ? details.selectionMode : getSelectedValue("selectionMode")
+      selectionMode: details && details.selectionMode ? details.selectionMode : getSelectedValue("selectionMode"),
+      saveQualityKey: details && details.saveQualityKey ? details.saveQualityKey : getActualSaveQualitySetting().key,
+      saveQualityLabel: details && details.saveQualityLabel ? details.saveQualityLabel : getActualSaveQualitySetting().label,
+      renderThumbSize: details && details.renderThumbSize ? details.renderThumbSize : getActualSaveQualitySetting().size,
+      usagePreset: getSelectedValue("usagePreset"),
+      tileLayout: details && details.tileLayout ? details.tileLayout : []
     };
   }
 
@@ -487,9 +631,30 @@
     usageStats.classList.remove("visible");
   }
 
-  function createMosaicHtml(imageDataUrl, info) {
+  async function createMosaicHtml(info) {
     const createdAt = formatDateTime(info.createdAt);
     const selectionModeLabel = info.selectionMode === "balanced" ? "バランス優先" : "色を優先";
+    const usagePresetLabel = info.usagePreset === "screen" ? "画面で拡大して見る用" : "印刷用";
+    const exportTiles = await getExportTiles();
+    const tilesJson = escapeScriptJson(exportTiles);
+    const layoutJson = escapeScriptJson(info.tileLayout);
+    const metaJson = escapeScriptJson({
+      outputWidth: info.outputWidth,
+      outputHeight: info.outputHeight,
+      tileSize: info.tileSize
+    });
+    const usedTileList = exportTiles
+      .filter((tile) => tile.usedCount > 0)
+      .sort((a, b) => b.usedCount - a.usedCount || a.id - b.id)
+      .map((tile) => `
+        <article class="tile-card" data-tile-id="${tile.id}">
+          <img src="${tile.dataUrl}" alt="${escapeHtml(tile.fileName)}">
+          <div>
+            <strong>${escapeHtml(tile.fileName)}</strong>
+            <span>${tile.usedCount}回使用</span>
+          </div>
+        </article>`)
+      .join("");
 
     return `<!doctype html>
 <html lang="ja">
@@ -521,7 +686,7 @@
       }
 
       main {
-        width: min(980px, calc(100% - 28px));
+        width: min(1180px, calc(100% - 28px));
         margin: 0 auto;
         padding: 28px 0 36px;
       }
@@ -549,10 +714,57 @@
 
       img {
         display: block;
-        width: 100%;
         height: auto;
-        margin: 0 auto;
         border-radius: 8px;
+      }
+
+      .viewer {
+        overflow: auto;
+        max-height: 76vh;
+        border: 2px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf6;
+      }
+
+      .mosaic {
+        position: relative;
+        margin: 0 auto;
+        transform-origin: top left;
+      }
+
+      .mosaic-tile {
+        position: absolute;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        cursor: zoom-in;
+      }
+
+      .mosaic-tile img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 0;
+      }
+
+      .viewer-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 12px 0;
+      }
+
+      .viewer-tools button {
+        min-height: 42px;
+        padding: 0 14px;
+        border: 2px solid var(--olive);
+        border-radius: 8px;
+        background: #fffdf6;
+        color: var(--olive-dark);
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
       }
 
       dl {
@@ -589,6 +801,83 @@
         font-weight: 700;
       }
 
+      h2 {
+        margin: 24px 0 12px;
+        color: var(--olive-dark);
+        font-size: 1.35rem;
+      }
+
+      .tile-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 12px;
+      }
+
+      .tile-card {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fffdf6;
+      }
+
+      .tile-card img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: cover;
+      }
+
+      .tile-card strong,
+      .tile-card span {
+        display: block;
+        overflow-wrap: anywhere;
+      }
+
+      .tile-card span {
+        color: var(--muted);
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      dialog {
+        width: min(720px, calc(100% - 24px));
+        border: 2px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      dialog::backdrop {
+        background: rgba(63, 58, 45, 0.45);
+      }
+
+      dialog img {
+        width: 100%;
+        max-height: 70vh;
+        object-fit: contain;
+      }
+
+      .dialog-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+
+      .dialog-head button {
+        min-width: 42px;
+        min-height: 42px;
+        border: 2px solid var(--olive);
+        border-radius: 8px;
+        background: #fffdf6;
+        color: var(--olive-dark);
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
       @media (max-width: 620px) {
         main {
           width: min(100% - 20px, 620px);
@@ -623,7 +912,15 @@
       <p class="series">写真つぶつぶアートくん</p>
       <h1>フォトモザイク作品</h1>
       <section class="card">
-        <img src="${imageDataUrl}" alt="完成したフォトモザイク画像">
+        <div class="viewer-tools" aria-label="拡大表示の操作">
+          <button type="button" data-zoom="0.75">75%</button>
+          <button type="button" data-zoom="1">100%</button>
+          <button type="button" data-zoom="1.5">150%</button>
+          <button type="button" data-zoom="2">200%</button>
+        </div>
+        <div class="viewer">
+          <div id="mosaic" class="mosaic" aria-label="完成したフォトモザイク"></div>
+        </div>
         <dl>
           ${createMetaItem("作成日時", createdAt)}
           ${createMetaItem("使用された素材写真数", `${info.usedTileCount}枚`)}
@@ -633,19 +930,133 @@
           ${createMetaItem("タイルサイズ", `${info.tileSize}px`)}
           ${createMetaItem("元画像の重ね具合", `${info.overlayPercent}%`)}
           ${createMetaItem("出力サイズ", `${info.outputWidth}px x ${info.outputHeight}px`)}
+          ${createMetaItem("保存品質", `${info.saveQualityLabel}（${info.renderThumbSize}px）`)}
+          ${createMetaItem("用途", usagePresetLabel)}
           ${createMetaItem("素材の使い方", selectionModeLabel)}
         </dl>
       </section>
+      <section>
+        <h2>使われた素材写真</h2>
+        <div class="tile-list">
+          ${usedTileList}
+        </div>
+      </section>
       <p class="notice">
-        このHTMLはブラウザ内で生成されました。元画像・素材写真は外部送信されていません。
+        このHTMLはブラウザ内で生成されました。<br>
+        元画像・素材写真は外部送信されていません。
       </p>
+      <dialog id="tileDialog">
+        <div class="dialog-head">
+          <strong id="dialogTitle">素材写真</strong>
+          <button type="button" id="closeDialog">閉じる</button>
+        </div>
+        <img id="dialogImage" alt="">
+      </dialog>
     </main>
+    <script>
+      const tileImages = ${tilesJson};
+      const tileLayout = ${layoutJson};
+      const meta = ${metaJson};
+      const imageMap = new Map(tileImages.map((tile) => [tile.id, tile]));
+      const mosaic = document.getElementById("mosaic");
+      const dialog = document.getElementById("tileDialog");
+      const dialogImage = document.getElementById("dialogImage");
+      const dialogTitle = document.getElementById("dialogTitle");
+      const closeDialog = document.getElementById("closeDialog");
+
+      function applyZoom(zoom) {
+        mosaic.style.width = Math.round(meta.outputWidth * zoom) + "px";
+        mosaic.style.height = Math.round(meta.outputHeight * zoom) + "px";
+        [...mosaic.children].forEach((button, index) => {
+          const tile = tileLayout[index];
+          button.style.left = Math.round(tile.x * zoom) + "px";
+          button.style.top = Math.round(tile.y * zoom) + "px";
+          button.style.width = Math.ceil(tile.width * zoom) + "px";
+          button.style.height = Math.ceil(tile.height * zoom) + "px";
+        });
+      }
+
+      mosaic.style.width = meta.outputWidth + "px";
+      mosaic.style.height = meta.outputHeight + "px";
+
+      for (const tile of tileLayout) {
+        const image = imageMap.get(tile.id);
+        if (!image) {
+          continue;
+        }
+
+        const button = document.createElement("button");
+        const img = document.createElement("img");
+        button.type = "button";
+        button.className = "mosaic-tile";
+        button.style.left = tile.x + "px";
+        button.style.top = tile.y + "px";
+        button.style.width = tile.width + "px";
+        button.style.height = tile.height + "px";
+        button.dataset.tileId = String(tile.id);
+        img.src = image.dataUrl;
+        img.alt = image.fileName;
+        button.appendChild(img);
+        mosaic.appendChild(button);
+      }
+
+      document.querySelectorAll("[data-zoom]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const zoom = Number(button.dataset.zoom);
+          applyZoom(zoom);
+        });
+      });
+
+      document.addEventListener("click", (event) => {
+        const tileButton = event.target.closest("[data-tile-id]");
+        if (!tileButton) {
+          return;
+        }
+
+        const image = imageMap.get(Number(tileButton.dataset.tileId));
+        if (!image) {
+          return;
+        }
+
+        dialogTitle.textContent = image.fileName + " / " + image.usedCount + "回使用";
+        dialogImage.src = image.dataUrl;
+        dialogImage.alt = image.fileName;
+
+        if (dialog.showModal) {
+          dialog.showModal();
+        }
+      });
+
+      closeDialog.addEventListener("click", () => dialog.close());
+    </script>
   </body>
 </html>`;
   }
 
   function createMetaItem(label, value) {
     return `<div class="meta-item"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
+  }
+
+  async function getExportTiles() {
+    const usedTileIds = new Set((lastMosaicInfo && lastMosaicInfo.tileLayout
+      ? lastMosaicInfo.tileLayout
+      : []).map((tile) => tile.id));
+    const exportTiles = [];
+
+    for (const tile of tileLibrary) {
+      if (!usedTileIds.has(tile.id)) {
+        continue;
+      }
+
+      exportTiles.push({
+        id: tile.id,
+        fileName: tile.fileName,
+        usedCount: tile.usedCount,
+        dataUrl: await canvasToDataUrl(tile.renderThumb)
+      });
+    }
+
+    return exportTiles;
   }
 
   function formatDateTime(date) {
@@ -656,6 +1067,22 @@
       hour: "2-digit",
       minute: "2-digit"
     }).format(date);
+  }
+
+  function formatFileDate(date) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return [
+      date.getFullYear(),
+      pad(date.getMonth() + 1),
+      pad(date.getDate()),
+      "-",
+      pad(date.getHours()),
+      pad(date.getMinutes())
+    ].join("");
+  }
+
+  function escapeScriptJson(value) {
+    return JSON.stringify(value).replace(/<\//g, "<\\/");
   }
 
   function escapeHtml(value) {
