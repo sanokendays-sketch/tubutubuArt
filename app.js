@@ -721,6 +721,7 @@
       .viewer {
         overflow: auto;
         max-height: 76vh;
+        min-height: 280px;
         border: 2px solid var(--line);
         border-radius: 8px;
         background: #fffdf6;
@@ -755,6 +756,17 @@
         margin: 12px 0;
       }
 
+      .viewer-note {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .viewer-tools button,
+      .zoom-field input[type="range"] {
+        accent-color: var(--olive);
+      }
+
       .viewer-tools button {
         min-height: 42px;
         padding: 0 14px;
@@ -765,6 +777,21 @@
         font: inherit;
         font-weight: 800;
         cursor: pointer;
+      }
+
+      .viewer-tools button.active {
+        background: var(--olive);
+        color: #fffdf6;
+      }
+
+      .zoom-field {
+        display: grid;
+        grid-template-columns: auto minmax(150px, 260px);
+        gap: 8px;
+        align-items: center;
+        width: min(100%, 420px);
+        color: var(--olive-dark);
+        font-weight: 800;
       }
 
       dl {
@@ -912,13 +939,25 @@
       <p class="series">写真つぶつぶアートくん</p>
       <h1>フォトモザイク作品</h1>
       <section class="card">
+        <p class="viewer-note">
+          全体を見ると、フォトモザイク全体の絵柄が分かります。拡大すると、使われている1枚1枚の写真を見ることができます。
+        </p>
         <div class="viewer-tools" aria-label="拡大表示の操作">
-          <button type="button" data-zoom="0.75">75%</button>
+          <button type="button" data-mode="overview">全体を見る</button>
+          <button type="button" data-mode="photo">写真を見る</button>
+          <button type="button" data-fit="true">全体に合わせる</button>
+          <button type="button" data-zoom="0.1">10%</button>
+          <button type="button" data-zoom="0.15">15%</button>
+          <button type="button" data-zoom="0.25">25%</button>
+          <button type="button" data-zoom="0.5">50%</button>
           <button type="button" data-zoom="1">100%</button>
-          <button type="button" data-zoom="1.5">150%</button>
           <button type="button" data-zoom="2">200%</button>
+          <label class="zoom-field">
+            <span>表示倍率：<strong id="zoomValue">100%</strong></span>
+            <input id="zoomSlider" type="range" min="10" max="200" value="100">
+          </label>
         </div>
-        <div class="viewer">
+        <div id="viewer" class="viewer">
           <div id="mosaic" class="mosaic" aria-label="完成したフォトモザイク"></div>
         </div>
         <dl>
@@ -958,21 +997,53 @@
       const tileLayout = ${layoutJson};
       const meta = ${metaJson};
       const imageMap = new Map(tileImages.map((tile) => [tile.id, tile]));
+      const viewer = document.getElementById("viewer");
       const mosaic = document.getElementById("mosaic");
+      const zoomSlider = document.getElementById("zoomSlider");
+      const zoomValue = document.getElementById("zoomValue");
       const dialog = document.getElementById("tileDialog");
       const dialogImage = document.getElementById("dialogImage");
       const dialogTitle = document.getElementById("dialogTitle");
       const closeDialog = document.getElementById("closeDialog");
+      let currentMode = "overview";
+
+      function clampZoom(zoom) {
+        return Math.max(0.1, Math.min(2, zoom));
+      }
 
       function applyZoom(zoom) {
-        mosaic.style.width = Math.round(meta.outputWidth * zoom) + "px";
-        mosaic.style.height = Math.round(meta.outputHeight * zoom) + "px";
+        const safeZoom = clampZoom(zoom);
+        mosaic.style.width = Math.round(meta.outputWidth * safeZoom) + "px";
+        mosaic.style.height = Math.round(meta.outputHeight * safeZoom) + "px";
         [...mosaic.children].forEach((button, index) => {
           const tile = tileLayout[index];
-          button.style.left = Math.round(tile.x * zoom) + "px";
-          button.style.top = Math.round(tile.y * zoom) + "px";
-          button.style.width = Math.ceil(tile.width * zoom) + "px";
-          button.style.height = Math.ceil(tile.height * zoom) + "px";
+          button.style.left = Math.round(tile.x * safeZoom) + "px";
+          button.style.top = Math.round(tile.y * safeZoom) + "px";
+          button.style.width = Math.max(1, Math.ceil(tile.width * safeZoom)) + "px";
+          button.style.height = Math.max(1, Math.ceil(tile.height * safeZoom)) + "px";
+        });
+        zoomSlider.value = String(Math.round(safeZoom * 100));
+        zoomValue.textContent = Math.round(safeZoom * 100) + "%";
+      }
+
+      function getFitZoom() {
+        const containerWidth = Math.max(1, viewer.clientWidth - 24);
+        const containerHeight = Math.max(1, viewer.clientHeight - 24);
+        const scaleX = containerWidth / meta.outputWidth;
+        const scaleY = containerHeight / meta.outputHeight;
+        return clampZoom(Math.min(scaleX, scaleY, 1));
+      }
+
+      function fitToViewer() {
+        currentMode = "overview";
+        applyZoom(getFitZoom());
+        updateActiveButtons();
+        viewer.scrollTo({ top: 0, left: 0 });
+      }
+
+      function updateActiveButtons() {
+        document.querySelectorAll("[data-mode]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.mode === currentMode);
         });
       }
 
@@ -1003,9 +1074,35 @@
       document.querySelectorAll("[data-zoom]").forEach((button) => {
         button.addEventListener("click", () => {
           const zoom = Number(button.dataset.zoom);
+          currentMode = zoom >= 1 ? "photo" : "overview";
           applyZoom(zoom);
+          updateActiveButtons();
         });
       });
+
+      document.querySelector("[data-fit]").addEventListener("click", fitToViewer);
+
+      document.querySelector('[data-mode="overview"]').addEventListener("click", fitToViewer);
+      document.querySelector('[data-mode="photo"]').addEventListener("click", () => {
+        currentMode = "photo";
+        applyZoom(1);
+        updateActiveButtons();
+      });
+
+      zoomSlider.addEventListener("input", () => {
+        const zoom = Number(zoomSlider.value) / 100;
+        currentMode = zoom >= 1 ? "photo" : "overview";
+        applyZoom(zoom);
+        updateActiveButtons();
+      });
+
+      window.addEventListener("resize", () => {
+        if (currentMode === "overview") {
+          fitToViewer();
+        }
+      });
+
+      window.requestAnimationFrame(fitToViewer);
 
       document.addEventListener("click", (event) => {
         const tileButton = event.target.closest("[data-tile-id]");
