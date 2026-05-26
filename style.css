@@ -37,7 +37,21 @@ input {
 }
 
 .hero {
+  display: grid;
+  grid-template-columns: 116px 1fr;
+  gap: 20px;
+  align-items: center;
   padding: 26px 0 18px;
+}
+
+.app-icon {
+  width: 116px;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf6;
+  box-shadow: 0 10px 24px rgba(77, 65, 38, 0.12);
 }
 
 .series-name {
@@ -325,6 +339,15 @@ canvas.has-image {
     grid-template-columns: 1fr;
   }
 
+  .hero {
+    grid-template-columns: 84px 1fr;
+    gap: 14px;
+  }
+
+  .app-icon {
+    width: 84px;
+  }
+
   .preview-head {
     display: block;
   }
@@ -335,6 +358,16 @@ canvas.has-image {
 }
 
 @media (max-width: 480px) {
+  .hero {
+    grid-template-columns: 64px 1fr;
+    gap: 10px;
+    align-items: start;
+  }
+
+  .app-icon {
+    width: 64px;
+  }
+
   .control-panel,
   .preview-panel {
     padding: 14px;
