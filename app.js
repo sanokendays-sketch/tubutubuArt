@@ -635,6 +635,7 @@
     const createdAt = formatDateTime(info.createdAt);
     const selectionModeLabel = info.selectionMode === "balanced" ? "バランス優先" : "色を優先";
     const usagePresetLabel = info.usagePreset === "screen" ? "画面で拡大して見る用" : "印刷用";
+    const completeImageDataUrl = await canvasToDataUrl(canvas);
     const exportTiles = await getExportTiles();
     const tilesJson = escapeScriptJson(exportTiles);
     const layoutJson = escapeScriptJson(info.tileLayout);
@@ -731,21 +732,39 @@
         position: relative;
         margin: 0 auto;
         transform-origin: top left;
+        line-height: 0;
+        font-size: 0;
       }
 
       .mosaic-tile {
         position: absolute;
+        display: block;
         padding: 0;
+        margin: 0;
         border: 0;
         background: transparent;
+        appearance: none;
         cursor: zoom-in;
+        line-height: 0;
+        font-size: 0;
       }
 
       .mosaic-tile img {
+        display: block;
         width: 100%;
         height: 100%;
         object-fit: cover;
         border-radius: 0;
+      }
+
+      .complete-image {
+        display: block;
+        margin: 0 auto;
+        border-radius: 0;
+      }
+
+      .view-hidden {
+        display: none;
       }
 
       .viewer-tools {
@@ -940,11 +959,11 @@
       <h1>フォトモザイク作品</h1>
       <section class="card">
         <p class="viewer-note">
-          全体を見ると、フォトモザイク全体の絵柄が分かります。拡大すると、使われている1枚1枚の写真を見ることができます。
+          完成イメージでは、遠くから見たときの全体像を確認できます。素材写真を見るモードでは、拡大して1枚1枚の写真を楽しめます。
         </p>
         <div class="viewer-tools" aria-label="拡大表示の操作">
-          <button type="button" data-mode="overview">全体を見る</button>
-          <button type="button" data-mode="photo">写真を見る</button>
+          <button type="button" data-view="complete">完成イメージを見る</button>
+          <button type="button" data-view="tiles">素材写真を見る</button>
           <button type="button" data-fit="true">全体に合わせる</button>
           <button type="button" data-zoom="0.1">10%</button>
           <button type="button" data-zoom="0.15">15%</button>
@@ -958,6 +977,12 @@
           </label>
         </div>
         <div id="viewer" class="viewer">
+          <img
+            id="completeImage"
+            class="complete-image"
+            src="${completeImageDataUrl}"
+            alt="完成イメージ"
+          >
           <div id="mosaic" class="mosaic" aria-label="完成したフォトモザイク"></div>
         </div>
         <dl>
@@ -999,13 +1024,14 @@
       const imageMap = new Map(tileImages.map((tile) => [tile.id, tile]));
       const viewer = document.getElementById("viewer");
       const mosaic = document.getElementById("mosaic");
+      const completeImage = document.getElementById("completeImage");
       const zoomSlider = document.getElementById("zoomSlider");
       const zoomValue = document.getElementById("zoomValue");
       const dialog = document.getElementById("tileDialog");
       const dialogImage = document.getElementById("dialogImage");
       const dialogTitle = document.getElementById("dialogTitle");
       const closeDialog = document.getElementById("closeDialog");
-      let currentMode = "overview";
+      let currentView = "complete";
 
       function clampZoom(zoom) {
         return Math.max(0.1, Math.min(2, zoom));
@@ -1013,6 +1039,8 @@
 
       function applyZoom(zoom) {
         const safeZoom = clampZoom(zoom);
+        completeImage.style.width = Math.round(meta.outputWidth * safeZoom) + "px";
+        completeImage.style.height = Math.round(meta.outputHeight * safeZoom) + "px";
         mosaic.style.width = Math.round(meta.outputWidth * safeZoom) + "px";
         mosaic.style.height = Math.round(meta.outputHeight * safeZoom) + "px";
         [...mosaic.children].forEach((button, index) => {
@@ -1035,20 +1063,21 @@
       }
 
       function fitToViewer() {
-        currentMode = "overview";
         applyZoom(getFitZoom());
         updateActiveButtons();
         viewer.scrollTo({ top: 0, left: 0 });
       }
 
       function updateActiveButtons() {
-        document.querySelectorAll("[data-mode]").forEach((button) => {
-          button.classList.toggle("active", button.dataset.mode === currentMode);
+        document.querySelectorAll("[data-view]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.view === currentView);
         });
       }
 
       mosaic.style.width = meta.outputWidth + "px";
       mosaic.style.height = meta.outputHeight + "px";
+      completeImage.style.width = meta.outputWidth + "px";
+      completeImage.style.height = meta.outputHeight + "px";
 
       for (const tile of tileLayout) {
         const image = imageMap.get(tile.id);
@@ -1074,7 +1103,6 @@
       document.querySelectorAll("[data-zoom]").forEach((button) => {
         button.addEventListener("click", () => {
           const zoom = Number(button.dataset.zoom);
-          currentMode = zoom >= 1 ? "photo" : "overview";
           applyZoom(zoom);
           updateActiveButtons();
         });
@@ -1082,27 +1110,34 @@
 
       document.querySelector("[data-fit]").addEventListener("click", fitToViewer);
 
-      document.querySelector('[data-mode="overview"]').addEventListener("click", fitToViewer);
-      document.querySelector('[data-mode="photo"]').addEventListener("click", () => {
-        currentMode = "photo";
+      function setView(view) {
+        currentView = view;
+        completeImage.classList.toggle("view-hidden", view !== "complete");
+        mosaic.classList.toggle("view-hidden", view !== "tiles");
+        updateActiveButtons();
+        fitToViewer();
+      }
+
+      document.querySelector('[data-view="complete"]').addEventListener("click", () => {
+        setView("complete");
+      });
+      document.querySelector('[data-view="tiles"]').addEventListener("click", () => {
+        setView("tiles");
         applyZoom(1);
         updateActiveButtons();
       });
 
       zoomSlider.addEventListener("input", () => {
         const zoom = Number(zoomSlider.value) / 100;
-        currentMode = zoom >= 1 ? "photo" : "overview";
         applyZoom(zoom);
         updateActiveButtons();
       });
 
       window.addEventListener("resize", () => {
-        if (currentMode === "overview") {
-          fitToViewer();
-        }
+        fitToViewer();
       });
 
-      window.requestAnimationFrame(fitToViewer);
+      window.requestAnimationFrame(() => setView("complete"));
 
       document.addEventListener("click", (event) => {
         const tileButton = event.target.closest("[data-tile-id]");
